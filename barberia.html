@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Barbería Premium POS</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+    --gold: #d4af37;
+    --dark: #0c0c0c;
+    --card: rgba(255,255,255,0.05);
+}
+
+body {
+    margin:0;
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg,#000,#1a1a1a);
+    color:white;
+}
+
+header {
+    text-align:center;
+    padding:15px;
+    font-size:22px;
+    color:var(--gold);
+    border-bottom:1px solid rgba(255,255,255,0.1);
+}
+
+#login {
+    text-align:center;
+    margin-top:120px;
+}
+
+input, select {
+    width:250px;
+    padding:10px;
+    margin:5px;
+    border:none;
+    border-radius:8px;
+}
+
+button {
+    padding:10px;
+    background:var(--gold);
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:bold;
+    transition:0.3s;
+}
+
+button:hover {
+    transform:scale(1.05);
+}
+
+.container {
+    display:flex;
+}
+
+.panel {
+    width:280px;
+    padding:15px;
+    backdrop-filter: blur(10px);
+    background:var(--card);
+    height:100vh;
+    overflow:auto;
+}
+
+.main {
+    flex:1;
+    padding:20px;
+}
+
+.card {
+    background:var(--card);
+    padding:12px;
+    margin:8px 0;
+    border-radius:10px;
+    backdrop-filter: blur(10px);
+    box-shadow:0 0 10px rgba(0,0,0,0.5);
+}
+
+h3 {
+    color:var(--gold);
+}
+
+.full {
+    width:100%;
+}
+
+.total {
+    font-size:22px;
+    color:var(--gold);
+}
+
+.hidden { display:none; }
+
+.logout {
+    background:#b30000;
+    color:white;
+    margin-top:10px;
+}
+
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+    <h1>💈 Barbería Premium</h1>
+    <input id="user" placeholder="Usuario"><br>
+    <input id="pass" type="password" placeholder="Contraseña"><br>
+    <button onclick="login()">Entrar</button>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+
+<header>
+💈 Barbería Premium POS
+<br>
+<button class="logout" onclick="logout()">Cerrar Sesión</button>
+</header>
+
+<div class="container">
+
+<div class="panel">
+
+<h3>Servicios</h3>
+<input id="servicio" placeholder="Nombre">
+<input id="precio" placeholder="Precio">
+<button class="full" onclick="addService()">Agregar</button>
+<div id="services"></div>
+
+<h3>Usuarios</h3>
+<input id="newUser" placeholder="Usuario">
+<input id="newPass" placeholder="Contraseña">
+<button class="full" onclick="addUser()">Agregar</button>
+<div id="users"></div>
+
+<button class="full" onclick="printReport()">📊 Cierre del Día</button>
+
+</div>
+
+<div class="main">
+
+<h2>Venta</h2>
+
+<select id="serviceSelect"></select>
+<button onclick="addToSale()">Agregar</button>
+
+<div id="saleList"></div>
+
+<div class="total">Total: $<span id="total">0</span></div>
+
+<button onclick="finishSale()">💰 Finalizar Venta</button>
+<button onclick="printTicket()">🧾 Ticket</button>
+
+<h2>Historial</h2>
+<div id="history"></div>
+
+<h2>Gráfica</h2>
+<canvas id="chart"></canvas>
+
+</div>
+
+</div>
+</div>
+
+<script>
+
+// REFERENCIAS DOM
+const servicio = document.getElementById("servicio");
+const precio = document.getElementById("precio");
+const servicesDiv = document.getElementById("services");
+
+const newUser = document.getElementById("newUser");
+const newPass = document.getElementById("newPass");
+const usersDiv = document.getElementById("users");
+
+const serviceSelect = document.getElementById("serviceSelect");
+const saleList = document.getElementById("saleList");
+const historyDiv = document.getElementById("history");
+
+const userInput = document.getElementById("user");
+const passInput = document.getElementById("pass");
+
+const chartCanvas = document.getElementById("chart");
+
+// DATOS
+let services = JSON.parse(localStorage.getItem("services")) || [];
+let sales = JSON.parse(localStorage.getItem("sales")) || [];
+let users = JSON.parse(localStorage.getItem("users")) || [{user:"admin",pass:"1234"}];
+
+let currentSale = [];
+let currentUser = null;
+let chartInstance = null;
+
+// GUARDAR
+function save(){
+localStorage.setItem("services",JSON.stringify(services));
+localStorage.setItem("sales",JSON.stringify(sales));
+localStorage.setItem("users",JSON.stringify(users));
+}
+
+// LOGIN
+function login(){
+let u = userInput.value;
+let p = passInput.value;
+
+let found = users.find(x=>x.user===u && x.pass===p);
+
+if(found){
+document.getElementById("login").classList.add("hidden");
+document.getElementById("app").classList.remove("hidden");
+currentUser = u;
+renderAll();
+}else alert("Error");
+}
+
+// 🔴 LOGOUT NUEVO
+function logout(){
+currentUser = null;
+currentSale = [];
+
+document.getElementById("app").classList.add("hidden");
+document.getElementById("login").classList.remove("hidden");
+
+userInput.value = "";
+passInput.value = "";
+}
+
+// SERVICIOS
+function addService(){
+if(!servicio.value || !precio.value) return alert("Completa datos");
+services.push({name:servicio.value,price:parseFloat(precio.value)});
+servicio.value=""; precio.value="";
+save(); renderServices();
+}
+
+function deleteService(i){
+services.splice(i,1);
+save(); renderServices();
+}
+
+function renderServices(){
+let html="", select="";
+services.forEach((s,i)=>{
+html+=`<div class="card">${s.name} - $${s.price}
+<button onclick="deleteService(${i})">X</button></div>`;
+select+=`<option value="${i}">${s.name}</option>`;
+});
+servicesDiv.innerHTML = html;
+serviceSelect.innerHTML = select;
+}
+
+// USUARIOS
+function addUser(){
+if(!newUser.value || !newPass.value) return alert("Completa datos");
+users.push({user:newUser.value,pass:newPass.value});
+newUser.value=""; newPass.value="";
+save(); renderUsers();
+}
+
+function deleteUser(i){
+users.splice(i,1);
+save(); renderUsers();
+}
+
+function renderUsers(){
+let html="";
+users.forEach((u,i)=>{
+html+=`<div class="card">${u.user}
+<button onclick="deleteUser(${i})">X</button></div>`;
+});
+usersDiv.innerHTML = html;
+}
+
+// VENTA
+function addToSale(){
+if(services.length===0) return alert("No hay servicios");
+currentSale.push(services[serviceSelect.value]);
+renderSale();
+}
+
+function renderSale(){
+let html="", total=0;
+currentSale.forEach(s=>{
+html+=`<div class="card">${s.name} - $${s.price}</div>`;
+total+=s.price;
+});
+saleList.innerHTML=html;
+document.getElementById("total").innerText=total;
+}
+
+function finishSale(){
+if(currentSale.length===0) return alert("No hay venta");
+let total=currentSale.reduce((a,b)=>a+b.price,0);
+sales.push({total,date:new Date().toLocaleString(),user:currentUser});
+currentSale=[];
+save(); renderAll();
+}
+
+// HISTORIAL
+function renderHistory(){
+let html="";
+sales.forEach(s=>{
+html+=`<div class="card">${s.date} - $${s.total} (${s.user})</div>`;
+});
+historyDiv.innerHTML=html;
+}
+
+// TICKET
+function printTicket(){
+if(currentSale.length===0) return alert("No hay venta");
+let total=currentSale.reduce((a,b)=>a+b.price,0);
+let w=window.open();
+w.document.write(`<h2>💈 Barbería Premium</h2>`);
+currentSale.forEach(s=>{
+w.document.write(`<p>${s.name} - $${s.price}</p>`);
+});
+w.document.write(`<h3>Total: $${total}</h3>`);
+w.print();
+}
+
+// REPORTE
+function printReport(){
+let total=0;
+let w=window.open();
+w.document.write("<h1>Cierre del Día</h1>");
+
+sales.forEach(s=>{
+total+=s.total;
+w.document.write(`<p>${s.date} - $${s.total}</p>`);
+});
+
+w.document.write(`<h2>Total: $${total}</h2>`);
+w.print();
+}
+
+// GRAFICA
+function renderChart(){
+let data=sales.map(s=>s.total);
+
+if(chartInstance){
+chartInstance.destroy();
+}
+
+chartInstance = new Chart(chartCanvas,{
+type:'bar',
+data:{
+labels:data.map((_,i)=>"Venta "+(i+1)),
+datasets:[{data,backgroundColor:"#d4af37"}]
+}
+});
+}
+
+// RENDER TODO
+function renderAll(){
+renderServices();
+renderUsers();
+renderSale();
+renderHistory();
+renderChart();
+}
+
+</script>
+
+</body>
+</html>
